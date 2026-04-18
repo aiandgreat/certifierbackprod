@@ -1,11 +1,14 @@
 # In-memory binary stream (used to build PDF before saving)
 from io import BytesIO
+from urllib.parse import urljoin
 
 # Used for formatting date fields
 from datetime import date, datetime
 
 # Used to save generated PDF to model
 from django.core.files.base import ContentFile
+from django.conf import settings
+from django.urls import reverse
 
 # Color utilities for PDF text
 from reportlab.lib import colors
@@ -21,6 +24,9 @@ from reportlab.pdfgen import canvas
 
 # For landscape orientation
 from reportlab.lib.pagesizes import landscape
+from reportlab.graphics.barcode import qr as qr_lib
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics import renderPDF
 
 
 def _clamp_pct(value, default=50.0):
@@ -39,6 +45,22 @@ def _parse_font_size(value, default=24):
     except (TypeError, ValueError):
         size = float(default)
     return max(8.0, min(200.0, size))
+
+
+def _parse_positive_size(value, default=120.0):
+    try:
+        size = float(value)
+    except (TypeError, ValueError):
+        size = float(default)
+    return max(24.0, min(500.0, size))
+
+
+def _parse_positive_pct(value, default=10.0):
+    try:
+        pct = float(value)
+    except (TypeError, ValueError):
+        pct = float(default)
+    return max(1.0, min(100.0, pct))
 
 
 def _parse_color(value):
@@ -76,6 +98,76 @@ def _certificate_field_value(cert, key):
     }
     # Return empty if key not found
     return str(mapping.get(key, ''))
+
+
+def _build_qr_payload(cert):
+    encode_mode = str(getattr(settings, 'QR_ENCODE_MODE', 'certificate_id') or 'certificate_id').strip().lower()
+
+    if encode_mode == 'verification_url':
+        verify_path = reverse('verify_certificate', kwargs={'certificate_id': cert.certificate_id})
+        base_url = str(getattr(settings, 'VERIFICATION_BASE_URL', '') or '').strip()
+        if not base_url:
+            return verify_path
+
+        if not base_url.endswith('/'):
+            base_url = f"{base_url}/"
+        return urljoin(base_url, verify_path.lstrip('/'))
+
+    return cert.certificate_id
+
+
+def _draw_qr_from_marker(pdf, marker, page_width, page_height, verify_url):
+    x_pct = _clamp_pct(marker.get('xPct'), default=90.0)
+    y_pct = _clamp_pct(marker.get('yPct'), default=88.0)
+
+    width_pct = marker.get('widthPct')
+    height_pct = marker.get('heightPct')
+    size_pct = marker.get('sizePct')
+    size_px = marker.get('size')
+
+    if width_pct is not None and height_pct is not None:
+        qr_width = (_parse_positive_pct(width_pct, default=12.0) / 100.0) * page_width
+        qr_height = (_parse_positive_pct(height_pct, default=12.0) / 100.0) * page_height
+    elif size_pct is not None:
+        size_from_pct = (_parse_positive_pct(size_pct, default=16.0) / 100.0) * min(page_width, page_height)
+        qr_width = size_from_pct
+        qr_height = size_from_pct
+    else:
+        size = _parse_positive_size(size_px, default=min(page_width, page_height) * 0.16)
+        qr_width = size
+        qr_height = size
+
+    x = (x_pct / 100.0) * page_width
+    y = page_height - ((y_pct / 100.0) * page_height)
+
+    qr_width = _parse_positive_size(qr_width)
+    qr_height = _parse_positive_size(qr_height)
+
+    widget = qr_lib.QrCodeWidget(verify_url)
+    bounds = widget.getBounds()
+    x1, y1, x2, y2 = bounds
+    drawing = Drawing(qr_width, qr_height, transform=[
+        qr_width / (x2 - x1),
+        0,
+        0,
+        qr_height / (y2 - y1),
+        -x1 * qr_width / (x2 - x1),
+        -y1 * qr_height / (y2 - y1),
+    ])
+    drawing.add(widget)
+
+    # Marker coordinates are treated as top-left anchor for consistency with text marker UX.
+    renderPDF.draw(drawing, pdf, x, y - qr_height)
+
+
+def _draw_default_qr(pdf, page_width, page_height, verify_url):
+    default_size = min(page_width, page_height) * 0.16
+    marker = {
+        'xPct': 90.0,
+        'yPct': 88.0,
+        'size': default_size,
+    }
+    _draw_qr_from_marker(pdf, marker, page_width, page_height, verify_url)
 
 
 def _draw_default_layout(pdf, cert):
@@ -160,6 +252,8 @@ def build_certificate_pdf_bytes(cert):
 
     # Track if any text is drawn
     rendered_marker = False
+    qr_drawn = False
+    verify_url = _build_qr_payload(cert)
 
     # Loop through all markers (dynamic positioning)
     for marker in markers:
@@ -167,6 +261,12 @@ def build_certificate_pdf_bytes(cert):
             continue
 
         key = marker.get('key')
+
+        if key == 'qr_code':
+            _draw_qr_from_marker(pdf, marker, page_width, page_height, verify_url)
+            qr_drawn = True
+            continue
+
         value = _certificate_field_value(cert, key)
         if not value:
             continue
@@ -198,6 +298,9 @@ def build_certificate_pdf_bytes(cert):
     # If no markers rendered → fallback layout
     if not rendered_marker:
         _draw_default_layout(pdf, cert)
+
+    if not qr_drawn:
+        _draw_default_qr(pdf, page_width, page_height, verify_url)
 
      # Finalize PDF
     pdf.showPage()
