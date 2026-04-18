@@ -9,12 +9,28 @@ from google.auth.transport.requests import Request
 from google.oauth2 import id_token
 
 
-GOOGLE_OAUTH_CLIENT_ID = os.getenv('GOOGLE_OAUTH_CLIENT_ID')
-GOOGLE_OAUTH_CLIENT_SECRET = os.getenv('GOOGLE_OAUTH_CLIENT_SECRET')
-GOOGLE_OAUTH_REDIRECT_URI = os.getenv(
-    'GOOGLE_OAUTH_REDIRECT_URI',
-    'http://127.0.0.1:8000/api/auth/google/callback/'
-)
+# Read config at call time to avoid stale values and to fail-fast with helpful errors
+def _get_oauth_setting(name, default=None):
+    val = os.getenv(name, default)
+    if val is None or val == '':
+        return None
+    return val
+
+
+def _get_google_oauth_config():
+    """Return a tuple (client_id, client_secret, redirect_uri).
+
+    If required values are missing, returns None for them so callers can
+    produce a clear error message rather than silently sending an empty
+    client_id to Google.
+    """
+    client_id = _get_oauth_setting('GOOGLE_OAUTH_CLIENT_ID')
+    client_secret = _get_oauth_setting('GOOGLE_OAUTH_CLIENT_SECRET')
+    redirect_uri = _get_oauth_setting(
+        'GOOGLE_OAUTH_REDIRECT_URI',
+        'http://127.0.0.1:8000/api/auth/google/callback/'
+    )
+    return client_id, client_secret, redirect_uri
 
 GOOGLE_OAUTH_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -33,9 +49,15 @@ def get_google_auth_url(state, return_to=None, hd='ua.edu.ph'):
     Returns:
         Authorization URL string
     """
+    client_id, _, redirect_uri = _get_google_oauth_config()
+
+    if not client_id:
+        # Fail fast with a clear error so it's obvious the env var is missing
+        raise RuntimeError('GOOGLE_OAUTH_CLIENT_ID is not set in the environment')
+
     params = {
-        'client_id': GOOGLE_OAUTH_CLIENT_ID,
-        'redirect_uri': GOOGLE_OAUTH_REDIRECT_URI,
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
         'response_type': 'code',
         'scope': 'openid email profile',
         'state': state,
@@ -55,16 +77,27 @@ def exchange_code_for_token(code):
     Returns:
         Dictionary with access_token, id_token, etc.
     """
+    client_id, client_secret, redirect_uri = _get_google_oauth_config()
+
+    if not client_id or not client_secret:
+        raise RuntimeError('GOOGLE_OAUTH_CLIENT_ID and/or GOOGLE_OAUTH_CLIENT_SECRET are not set in the environment')
+
     payload = {
-        'client_id': GOOGLE_OAUTH_CLIENT_ID,
-        'client_secret': GOOGLE_OAUTH_CLIENT_SECRET,
+        'client_id': client_id,
+        'client_secret': client_secret,
         'code': code,
         'grant_type': 'authorization_code',
-        'redirect_uri': GOOGLE_OAUTH_REDIRECT_URI,
+        'redirect_uri': redirect_uri,
     }
-    
+
     response = requests.post(GOOGLE_TOKEN_URL, data=payload)
-    response.raise_for_status()
+    # Provide more context on failure
+    try:
+        response.raise_for_status()
+    except Exception as e:
+        # Attach response text to make debugging provider errors easier
+        raise RuntimeError(f'Failed exchanging code for token: {e}; response={response.text}')
+
     return response.json()
 
 
@@ -80,10 +113,14 @@ def get_user_info_from_id_token(id_token_str):
     """
     try:
         # Verify and decode the ID token
+        client_id, _, _ = _get_google_oauth_config()
+        if not client_id:
+            raise RuntimeError('GOOGLE_OAUTH_CLIENT_ID is not set in the environment')
+
         idinfo = id_token.verify_oauth2_token(
             id_token_str,
             Request(),
-            GOOGLE_OAUTH_CLIENT_ID
+            client_id
         )
         
         # Verify hosted domain
