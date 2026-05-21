@@ -156,8 +156,20 @@ def _draw_qr_from_marker(pdf, marker, page_width, page_height, verify_url):
     ])
     drawing.add(widget)
 
-    # Marker coordinates are treated as top-left anchor for consistency with text marker UX.
-    renderPDF.draw(drawing, pdf, x, y - qr_height)
+    # Marker anchor defaults to center to match common drag marker UIs.
+    # Supported anchors: center, top-left, bottom-left.
+    anchor = str(marker.get('anchor') or 'center').strip().lower()
+    if anchor in ('top-left', 'top_left', 'topleft'):
+        draw_x = x
+        draw_y = y - qr_height
+    elif anchor in ('bottom-left', 'bottom_left', 'bottomleft'):
+        draw_x = x
+        draw_y = y
+    else:
+        draw_x = x - (qr_width / 2.0)
+        draw_y = y - (qr_height / 2.0)
+
+    renderPDF.draw(drawing, pdf, draw_x, draw_y)
 
 
 def _draw_default_qr(pdf, page_width, page_height, verify_url):
