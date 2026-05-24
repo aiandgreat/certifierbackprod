@@ -77,6 +77,31 @@ class TemplateSerializer(serializers.ModelSerializer):
         elif not isinstance(markers, list):
             raise serializers.ValidationError("placeholders.markers must be a list.")
 
+        # Normalize each marker to ensure font-related fields are preserved
+        normalized = []
+        for m in value.get('markers', []):
+            if not isinstance(m, dict):
+                continue
+            marker = dict(m)  # shallow copy so we don't mutate input
+
+            # Font-related defaults (frontend will provide these, but ensure fallbacks)
+            marker.setdefault('fontFamily', marker.get('fontFamily') or 'Helvetica')
+            marker.setdefault('fontStyle', marker.get('fontStyle') or 'normal')
+            marker.setdefault('fontWeight', marker.get('fontWeight') or 'normal')
+            marker.setdefault('fontSize', marker.get('fontSize') or 24)
+            marker.setdefault('color', marker.get('color') or '#000000')
+            marker.setdefault('align', marker.get('align') or 'left')
+
+            # Coerce numeric fontSize if possible
+            try:
+                marker['fontSize'] = float(marker['fontSize'])
+            except Exception:
+                marker['fontSize'] = 24.0
+
+            normalized.append(marker)
+
+        value['markers'] = normalized
+
         return value
 
     def create(self, validated_data):

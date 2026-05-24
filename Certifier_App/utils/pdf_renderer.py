@@ -21,6 +21,9 @@ from reportlab.lib.utils import ImageReader
 
 # Core PDF drawing tool
 from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import os
 
 # For landscape orientation
 from reportlab.lib.pagesizes import landscape
@@ -71,6 +74,124 @@ def _parse_color(value):
         except ValueError:
             return colors.black
     return colors.black
+
+
+# Font registration cache
+_REGISTERED_FONTS = set()
+
+
+def _register_project_fonts():
+    """Register available font files from project `static/fonts` or similar locations.
+
+    Searches these locations in order:
+      - settings.FONT_DIR (if present)
+      - <BASE_DIR>/static/fonts
+      - app static fonts folder (Certifier_App/static/fonts)
+
+    Registers TTF/OTF files with ReportLab using the filename (without ext)
+    as the font name (e.g. 'Poppins-Bold').
+    """
+    global _REGISTERED_FONTS
+    if _REGISTERED_FONTS:
+        return
+
+    paths = []
+    try:
+        font_dir = getattr(settings, 'FONT_DIR', '') or ''
+        if font_dir:
+            paths.append(font_dir)
+    except Exception:
+        pass
+
+    try:
+        base_dir = getattr(settings, 'BASE_DIR', '') or ''
+        if base_dir:
+            paths.append(os.path.join(base_dir, 'static', 'fonts'))
+    except Exception:
+        pass
+
+    # app-local static fonts
+    app_fonts = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'static', 'fonts'))
+    paths.append(app_fonts)
+
+    tried = set()
+    for p in paths:
+        if not p or p in tried:
+            continue
+        tried.add(p)
+        if not os.path.isdir(p):
+            continue
+        try:
+            for fname in os.listdir(p):
+                fpath = os.path.join(p, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                lower = fname.lower()
+                if lower.endswith('.ttf') or lower.endswith('.otf') or lower.endswith('.woff') or lower.endswith('.woff2'):
+                    # We only register TTF/OTF with ReportLab; ignore woff/woff2
+                    if lower.endswith('.ttf') or lower.endswith('.otf'):
+                        name = os.path.splitext(fname)[0]
+                        try:
+                            pdfmetrics.registerFont(TTFont(name, fpath))
+                            _REGISTERED_FONTS.add(name)
+                        except Exception:
+                            # ignore failures for individual fonts
+                            continue
+        except Exception:
+            continue
+
+
+def _resolve_font_name(font_family, font_style, font_weight):
+    """Map requested font properties to a registered font name.
+
+    Examples:
+      ('Poppins', 'normal', 'bold') -> 'Poppins-Bold' if registered
+      ('Poppins', 'italic', 'bold') -> 'Poppins-BoldItalic' if registered
+    Falls back to None if no matching registered font is found.
+    """
+    _register_project_fonts()
+
+    if not font_family:
+        return None
+
+    fam = str(font_family).strip()
+    # Frontend may send CSS fallback stacks like "Poppins, sans-serif".
+    # ReportLab only knows the real family name, so keep the first token.
+    if ',' in fam:
+        fam = fam.split(',', 1)[0].strip()
+    fam = fam.strip('"').strip("'")
+    style = (str(font_style or 'normal') or 'normal').lower()
+    weight = (str(font_weight or 'normal') or 'normal').lower()
+
+    # Normalize weight values (support numeric strings)
+    if weight.isdigit():
+        weight_num = int(weight)
+        if weight_num >= 700:
+            weight = 'bold'
+        else:
+            weight = 'normal'
+
+    candidates = []
+    # Preferred naming: Family-BoldItalic, Family-Bold, Family-Italic, Family-Regular
+    name_base = fam.replace(' ', '')
+    if weight == 'bold' and style in ('italic', 'oblique'):
+        candidates.append(f"{name_base}-BoldItalic")
+        candidates.append(f"{name_base}BoldItalic")
+    if weight == 'bold':
+        candidates.append(f"{name_base}-Bold")
+        candidates.append(f"{name_base}Bold")
+    if style in ('italic', 'oblique'):
+        candidates.append(f"{name_base}-Italic")
+        candidates.append(f"{name_base}Italic")
+    # regular/default
+    candidates.append(f"{name_base}-Regular")
+    candidates.append(name_base)
+
+    for cand in candidates:
+        if cand in _REGISTERED_FONTS:
+            return cand
+
+    return None
 
 
 def _certificate_field_value(cert, key):
@@ -144,6 +265,12 @@ def _draw_qr_from_marker(pdf, marker, page_width, page_height, verify_url):
     qr_height = _parse_positive_size(qr_height)
 
     widget = qr_lib.QrCodeWidget(verify_url)
+    qr_color = _parse_color(marker.get('color'))
+    try:
+        widget.barFillColor = qr_color
+        widget.barStrokeColor = qr_color
+    except Exception:
+        pass
     bounds = widget.getBounds()
     x1, y1, x2, y2 = bounds
     drawing = Drawing(qr_width, qr_height, transform=[
@@ -294,10 +421,34 @@ def build_certificate_pdf_bytes(cert):
         font_size = _parse_font_size(marker.get('fontSize'), default=24)
         align = str(marker.get('align', 'left')).lower()
 
-        pdf.setFont('Helvetica', font_size)
+        # Resolve font from marker settings
+        font_family = marker.get('fontFamily')
+        font_style = marker.get('fontStyle')
+        font_weight = marker.get('fontWeight')
+
+        font_name = None
+        try:
+            font_name = _resolve_font_name(font_family, font_style, font_weight)
+        except Exception:
+            font_name = None
+
+        # Apply color
         pdf.setFillColor(_parse_color(marker.get('color')))
 
-        # Draw text with alignment
+        # Set font (fall back to Helvetica)
+        try:
+            if font_name:
+                pdf.setFont(font_name, font_size)
+            else:
+                # try bold/italic using built-in Times/Helvetica if requested
+                if (str(font_weight or '').lower() == 'bold'):
+                    pdf.setFont('Helvetica-Bold', font_size)
+                else:
+                    pdf.setFont('Helvetica', font_size)
+        except Exception:
+            pdf.setFont('Helvetica', font_size)
+
+        # Draw text with alignment (positioning unchanged)
         if align == 'center':
             pdf.drawCentredString(x, y, value)
         elif align == 'right':
