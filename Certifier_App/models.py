@@ -1,4 +1,5 @@
 from django.db import models
+import hashlib
 from django.conf import settings
 import uuid
 from django.contrib.auth.models import AbstractUser
@@ -101,6 +102,32 @@ class Certificate(models.Model):
     def get_data_string(self):
         return f"{self.title}|{self.full_name}|{self.course}|{self.issued_by}|{self.date_issued}|{self.certificate_id}"
     
+    def save(self, *args, **kwargs):
+        """
+        Override save to detect when editable certificate data has been changed
+        compared to the original signed hash. If the current data no longer
+        matches `original_data_hash`, mark the certificate as INVALID.
+
+        This makes edits from the Django admin (or any direct model save)
+        immediately reflect tampering without requiring an external verify
+        API call.
+        """
+        # Only run the tamper check for existing records that have an original hash
+        if self.pk and self.original_data_hash:
+            try:
+                # Load current DB state (pre-save) to distinguish creates
+                orig = Certificate.objects.get(pk=self.pk)
+            except Certificate.DoesNotExist:
+                orig = None
+
+            if orig is not None:
+                # Compute hash for the *new* data about to be saved
+                current_hash = hashlib.sha256(self.get_data_string().encode()).hexdigest()
+                if current_hash != self.original_data_hash:
+                    # Data changed after signing -> mark as invalid
+                    self.status = 'INVALID'
+
+        super().save(*args, **kwargs)
     
 
 

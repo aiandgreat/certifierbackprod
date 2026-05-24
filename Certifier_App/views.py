@@ -599,3 +599,45 @@ def process_bulk_upload(request, pk):
         upload.status = "FAILED"
         upload.save(update_fields=['status'])
         return Response({"error": str(e)}, status=500)
+
+# ================= ANALYTICS (ADMIN ONLY) =================
+from django.db.models import Count
+from django.db.models.functions import TruncMonth
+
+@api_view(['GET'])
+@permission_classes([IsAdminUserRole])
+def get_analytics(request):
+    """
+    Returns dashboard analytics data for admins.
+    """
+    total_certs = Certificate.objects.count()
+    total_users = User.objects.count()
+
+    # Carbon footprint calculation: 
+    # Approx 0.15kg CO2 saved per digital certificate (paper + printing + mailing)
+    carbon_footprint = total_certs * 0.15
+
+    # Monthly stats for the graph (using date_issued field)
+    monthly_stats = (
+        Certificate.objects
+        .annotate(month=TruncMonth('date_issued'))
+        .values('month')
+        .annotate(count=Count('id'))
+        .order_by('month')
+    )
+
+    # Format monthly stats for frontend
+    formatted_stats = []
+    for stat in monthly_stats:
+        if stat['month']:
+            formatted_stats.append({
+                'month': stat['month'].strftime('%b %Y'),
+                'count': stat['count']
+            })
+
+    return Response({
+        'total_certs': total_certs,
+        'total_users': total_users,
+        'carbon_footprint': round(carbon_footprint, 2),
+        'monthly_stats': formatted_stats
+    })
