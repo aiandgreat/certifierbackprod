@@ -58,60 +58,52 @@ class TemplateSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_by', 'created_at']
 
     def validate_placeholders(self, value):
-        # Normalize empty values so template upload does not fail with server errors.
+        # Handle empty
         if value in (None, ''):
             return {'markers': []}
 
+        # Handle stringified JSON (VERY IMPORTANT for FormData uploads)
         if isinstance(value, str):
             try:
                 value = json.loads(value)
-            except json.JSONDecodeError as exc:
-                raise serializers.ValidationError('placeholders must be valid JSON.') from exc
+            except json.JSONDecodeError:
+                raise serializers.ValidationError("placeholders must be valid JSON")
 
         if not isinstance(value, dict):
-            raise serializers.ValidationError('placeholders must be a JSON object.')
+            raise serializers.ValidationError("placeholders must be a JSON object")
 
         markers = value.get('markers', [])
-        if markers is None:
-            value['markers'] = []
-        elif not isinstance(markers, list):
-            raise serializers.ValidationError("placeholders.markers must be a list.")
 
-        # Normalize each marker to ensure font-related fields are preserved
-        normalized = []
-        for m in value.get('markers', []):
+        if markers is None:
+            markers = []
+
+        if not isinstance(markers, list):
+            raise serializers.ValidationError("markers must be a list")
+
+        cleaned = []
+
+        for m in markers:
             if not isinstance(m, dict):
                 continue
-            marker = dict(m)  # shallow copy so we don't mutate input
 
-            # Font-related defaults (frontend will provide these, but ensure fallbacks)
-            marker.setdefault('fontFamily', marker.get('fontFamily') or 'Helvetica')
-            marker.setdefault('fontStyle', marker.get('fontStyle') or 'normal')
-            marker.setdefault('fontWeight', marker.get('fontWeight') or 'normal')
-            marker.setdefault('fontSize', marker.get('fontSize') or 24)
-            marker.setdefault('color', marker.get('color') or '#000000')
-            marker.setdefault('align', marker.get('align') or 'left')
+            cleaned.append({
+                "key": m.get("key"),
+                "label": m.get("label"),
+                "xPct": float(m.get("xPct", 0)),
+                "yPct": float(m.get("yPct", 0)),
+                "fontSize": float(m.get("fontSize", 24)),
+                "color": m.get("color", "#000000"),
+                "align": m.get("align", "left"),
+                "fontFamily": m.get("fontFamily", "Helvetica"),
+                "fontStyle": m.get("fontStyle", "normal"),
+                "fontWeight": m.get("fontWeight", "normal"),
+            })
 
-            # Coerce numeric fontSize if possible
-            try:
-                marker['fontSize'] = float(marker['fontSize'])
-            except Exception:
-                marker['fontSize'] = 24.0
-
-            normalized.append(marker)
-
-        value['markers'] = normalized
-
-        return value
+        return {"markers": cleaned}
 
     def create(self, validated_data):
         validated_data.setdefault('placeholders', {'markers': []})
         return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        if 'placeholders' in validated_data and validated_data['placeholders'] in (None, ''):
-            validated_data['placeholders'] = {'markers': []}
-        return super().update(instance, validated_data)
 
 
 # ================= CERTIFICATE =================
