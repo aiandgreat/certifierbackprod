@@ -31,13 +31,33 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Read from environment for production; fall back to the existing key for local dev.
 SECRET_KEY = os.getenv('SECRET_KEY') or 'django-insecure-7)(8+e-1t1zrm1sl-m5y^(s)++7qgwiwrokgzy0p^^zi=p#l45'
 
+
+def _split_env_list(name, default=''):
+    raw_value = os.getenv(name, default) or ''
+    return [item.strip() for item in raw_value.split(',') if item.strip()]
+
+
+def _render_public_host():
+    host = os.getenv('RENDER_EXTERNAL_HOSTNAME', '').strip()
+    if host:
+        return host
+
+    service_name = os.getenv('RENDER_SERVICE_NAME', '').strip()
+    if service_name:
+        return f'{service_name}.onrender.com'
+
+    return ''
+
 # DEBUG should be False in production. Set env var to 'True' or '1' to enable locally.
 DEBUG = str(os.getenv('DEBUG', 'True')).lower() in ('1', 'true', 'yes')
 
 # CORS / hosts
 # By default allow all origins in local/dev. For production set ALLOWED_HOSTS and CORS_ALLOWED_ORIGINS.
 CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'True').lower() in ('1', 'true', 'yes')
-ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '').split(',') if h.strip()]
+ALLOWED_HOSTS = _split_env_list('ALLOWED_HOSTS')
+render_host = _render_public_host()
+if render_host and render_host not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(render_host)
 AUTH_USER_MODEL = 'Certifier_App.User'
 
 #TRY ONLY
@@ -174,7 +194,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 # Static URL
-STATIC_URL = os.getenv('STATIC_URL', 'static/')
+STATIC_URL = os.getenv('STATIC_URL', '/static/')
 
 # Static files (collected) root for production (can be overridden via env, e.g. Render disk mount)
 STATIC_ROOT = os.getenv('STATIC_ROOT', os.path.join(BASE_DIR, 'staticfiles'))
@@ -183,6 +203,13 @@ STATICFILES_STORAGE = os.getenv(
     'STATICFILES_STORAGE',
     'whitenoise.storage.CompressedManifestStaticFilesStorage'
 )
+
+# Trust the Render public origin automatically when running there.
+CSRF_TRUSTED_ORIGINS = _split_env_list('CSRF_TRUSTED_ORIGINS')
+if render_host:
+    render_origin = f'https://{render_host}'
+    if render_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(render_origin)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

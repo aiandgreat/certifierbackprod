@@ -36,6 +36,8 @@ services:
         value: "your-backend.onrender.com"
       - key: DEBUG
         value: "False"
+      - key: STATIC_URL
+        value: "/static/"
       - key: STATIC_ROOT
         value: "/data/static"
       - key: MEDIA_ROOT
