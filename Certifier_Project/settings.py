@@ -54,6 +54,9 @@ DEBUG = str(os.getenv('DEBUG', 'True')).lower() in ('1', 'true', 'yes')
 # CORS / hosts
 # By default allow all origins in local/dev. For production set ALLOWED_HOSTS and CORS_ALLOWED_ORIGINS.
 CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'True').lower() in ('1', 'true', 'yes')
+CORS_ALLOWED_ORIGINS = _split_env_list('CORS_ALLOWED_ORIGINS')
+if CORS_ALLOWED_ORIGINS:
+    CORS_ALLOW_ALL_ORIGINS = False
 ALLOWED_HOSTS = _split_env_list('ALLOWED_HOSTS')
 render_host = _render_public_host()
 if render_host and render_host not in ALLOWED_HOSTS:
