@@ -1,0 +1,53 @@
+# render.yaml.template
+#
+# Template for Render service (web) with a Persistent Disk mounted at /data.
+# Replace placeholder values before applying via Render Dashboard or the CLI.
+
+services:
+  - type: web
+    name: certifier-backend  # <--- change to your desired service name
+    env: python
+    region: oregon
+    plan: starter
+    branch: main
+    buildCommand: |
+      pip install -r requirements.txt
+      python manage.py migrate
+      python manage.py collectstatic --noinput
+    startCommand: gunicorn Certifier_Project.wsgi:application --bind 0.0.0.0:$PORT
+    disks:
+      - name: media-disk
+        mountPath: /data
+        sizeGB: 10
+    envVars:
+      - key: SECRET_KEY
+        value: "REPLACE_ME_SECRET_KEY"
+      - key: DATABASE_URL
+        value: "REPLACE_ME_DATABASE_URL"
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        value: "REPLACE_ME_GOOGLE_CLIENT_ID"
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        value: "REPLACE_ME_GOOGLE_CLIENT_SECRET"
+      - key: GOOGLE_OAUTH_REDIRECT_URI
+        value: "https://your-backend.onrender.com/api/auth/google/callback/"
+      - key: CERT_EDDSA_SIGNING_KEY
+        value: "REPLACE_ME_CERT_EDDSA_SIGNING_KEY"
+      - key: ALLOWED_HOSTS
+        value: "your-backend.onrender.com"
+      - key: DEBUG
+        value: "False"
+      - key: STATIC_ROOT
+        value: "/data/static"
+      - key: MEDIA_ROOT
+        value: "/data/media"
+      - key: MEDIA_URL
+        value: "/media/"
+      - key: STATICFILES_STORAGE
+        value: "whitenoise.storage.CompressedManifestStaticFilesStorage"
+      - key: FONT_DIR
+        value: "/data/fonts"
+
+# Notes:
+# - This file is a template. Replace all REPLACE_ME_ values and service name.
+# - Render will create the service and disk when you import this file via the Dashboard.
+# - After deploy, go to the service Settings -> Environment to paste any secret values.

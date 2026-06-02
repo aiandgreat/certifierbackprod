@@ -50,6 +50,21 @@ The app writes generated certificate PDFs and uploads to `MEDIA_ROOT` (defaults 
 - Attach a Render Persistent Disk and set `MEDIA_ROOT` to the mounted path.
 - Use an external object store (S3) and configure Django `DEFAULT_FILE_STORAGE` to use `django-storages` (not added by default).
 
+Render persistent disk example (recommended when not using S3):
+
+- In Render Dashboard, add a Persistent Disk to your Web Service and choose a mount path, e.g. `/data`.
+- Set these environment variables on the Web Service:
+
+```
+STATIC_ROOT=/data/static
+MEDIA_ROOT=/data/media
+MEDIA_URL=/media/
+STATICFILES_STORAGE=whitenoise.storage.CompressedManifestStaticFilesStorage
+```
+
+- Ensure your Build Command runs `python manage.py collectstatic --noinput` so static files are placed in `STATIC_ROOT`.
+- Files written to `/data/media` will persist across deploys; files in the default `media/` inside the container will not.
+
 5. Google OAuth configuration
 - In Google Cloud Console, add the Redirect URI exactly as `GOOGLE_OAUTH_REDIRECT_URI` (e.g. `https://your-service.onrender.com/api/auth/google/callback/`).
 
@@ -66,8 +81,15 @@ python manage.py runserver
 ## Notes
 - The code still supports local Postgres defaults when `DATABASE_URL` is not set to ease local development.
 - Do **not** expose `CERT_EDDSA_SIGNING_KEY` or `SECRET_KEY` publicly.
+- To generate a stable signing key locally, run `python manage.py generate_signing_key` and copy the printed private key hex into `CERT_EDDSA_SIGNING_KEY`.
+
+- A `.env.template` file has been added to the repo with exact variable names and example values. Copy it to `.env` for local development or paste the values into Render's Dashboard when creating environment variables.
 
 If you want, I can also:
 - Add a `Procfile` or `render.yaml` for automatic configuration.
 - Configure `django-storages` + S3 for persistent media.
 - Run a quick test deploy on your Render account if you provide access.
+
+I added a `render.yaml.template` that you can customize and import into Render to create the Web Service + persistent disk automatically. Edit the placeholders (service name and `REPLACE_ME_*` values) before importing.
+
+Template path: [render.yaml.template](render.yaml.template)

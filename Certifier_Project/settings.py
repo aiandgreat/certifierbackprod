@@ -41,8 +41,8 @@ ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '').split(',') if
 AUTH_USER_MODEL = 'Certifier_App.User'
 
 #TRY ONLY
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_URL = os.getenv('MEDIA_URL', '/media/')
+MEDIA_ROOT = os.getenv('MEDIA_ROOT', os.path.join(BASE_DIR, 'media'))
 
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 # Application definition
@@ -173,10 +173,11 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+# Static URL
+STATIC_URL = os.getenv('STATIC_URL', 'static/')
 
-# Static files (collected) root for production
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+# Static files (collected) root for production (can be overridden via env, e.g. Render disk mount)
+STATIC_ROOT = os.getenv('STATIC_ROOT', os.path.join(BASE_DIR, 'staticfiles'))
 # Use WhiteNoise storage for compressed files when available
 STATICFILES_STORAGE = os.getenv(
     'STATICFILES_STORAGE',
