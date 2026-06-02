@@ -1,7 +1,8 @@
 # render.yaml.template
 #
-# Template for Render service (web) with a Persistent Disk mounted at /data.
-# Replace placeholder values before applying via Render Dashboard or the CLI.
+# Template for Render web service.
+# Note: the free Render tier does not support Persistent Disks, so this template
+# keeps static/media on the app filesystem and uses WhiteNoise for static files.
 
 services:
   - type: web
@@ -15,10 +16,6 @@ services:
       python manage.py migrate
       python manage.py collectstatic --noinput
     startCommand: gunicorn Certifier_Project.wsgi:application --bind 0.0.0.0:$PORT
-    disks:
-      - name: media-disk
-        mountPath: /data
-        sizeGB: 10
     envVars:
       - key: SECRET_KEY
         value: "REPLACE_ME_SECRET_KEY"
@@ -38,18 +35,17 @@ services:
         value: "False"
       - key: STATIC_URL
         value: "/static/"
-      - key: STATIC_ROOT
-        value: "/data/static"
       - key: MEDIA_ROOT
-        value: "/data/media"
+        value: "media"
       - key: MEDIA_URL
         value: "/media/"
       - key: STATICFILES_STORAGE
         value: "whitenoise.storage.CompressedManifestStaticFilesStorage"
       - key: FONT_DIR
-        value: "/data/fonts"
+        value: ""
 
 # Notes:
 # - This file is a template. Replace all REPLACE_ME_ values and service name.
-# - Render will create the service and disk when you import this file via the Dashboard.
+# - On the free tier, do not add a persistent disk. If you later upgrade, you can
+#   move MEDIA_ROOT/FONT_DIR to a mounted path.
 # - After deploy, go to the service Settings -> Environment to paste any secret values.

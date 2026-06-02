@@ -198,11 +198,18 @@ STATIC_URL = os.getenv('STATIC_URL', '/static/')
 
 # Static files (collected) root for production (can be overridden via env, e.g. Render disk mount)
 STATIC_ROOT = os.getenv('STATIC_ROOT', os.path.join(BASE_DIR, 'staticfiles'))
-# Use WhiteNoise storage for compressed files when available
+
+# Django 5.2 prefers STORAGES for staticfiles. Keep STATICFILES_STORAGE as a
+# fallback env var so Render can still override the backend if needed.
 STATICFILES_STORAGE = os.getenv(
     'STATICFILES_STORAGE',
     'whitenoise.storage.CompressedManifestStaticFilesStorage'
 )
+STORAGES = {
+    'staticfiles': {
+        'BACKEND': STATICFILES_STORAGE,
+    },
+}
 
 # Trust the Render public origin automatically when running there.
 CSRF_TRUSTED_ORIGINS = _split_env_list('CSRF_TRUSTED_ORIGINS')
