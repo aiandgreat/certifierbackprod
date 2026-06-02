@@ -29,7 +29,6 @@ def _get_google_oauth_config():
     redirect_uri = _get_oauth_setting(
         'GOOGLE_OAUTH_REDIRECT_URI',
         'http://127.0.0.1:8000/api/auth/google/callback/',
-        'https://certifier-backend-b2ne.onrender.com/api/auth/google/callback/'
         
     )
     return client_id, client_secret, redirect_uri
