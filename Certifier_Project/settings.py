@@ -209,6 +209,9 @@ STATICFILES_STORAGE = os.getenv(
     'whitenoise.storage.CompressedManifestStaticFilesStorage'
 )
 STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
     'staticfiles': {
         'BACKEND': STATICFILES_STORAGE,
     },
