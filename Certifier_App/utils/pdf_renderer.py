@@ -78,6 +78,7 @@ def _parse_color(value):
 
 # Font registration cache
 _REGISTERED_FONTS = set()
+_FAILED_FONT_FILES = set()
 
 
 def _register_project_fonts():
@@ -92,8 +93,6 @@ def _register_project_fonts():
     as the font name (e.g. 'Poppins-Bold').
     """
     global _REGISTERED_FONTS
-    if _REGISTERED_FONTS:
-        return
 
     paths = []
     try:
@@ -127,16 +126,25 @@ def _register_project_fonts():
                 if not os.path.isfile(fpath):
                     continue
                 lower = fname.lower()
-                if lower.endswith('.ttf') or lower.endswith('.otf') or lower.endswith('.woff') or lower.endswith('.woff2'):
-                    # We only register TTF/OTF with ReportLab; ignore woff/woff2
-                    if lower.endswith('.ttf') or lower.endswith('.otf'):
-                        name = os.path.splitext(fname)[0]
-                        try:
-                            pdfmetrics.registerFont(TTFont(name, fpath))
-                            _REGISTERED_FONTS.add(name)
-                        except Exception:
-                            # ignore failures for individual fonts
-                            continue
+                if not (lower.endswith('.ttf') or lower.endswith('.otf')):
+                    # ReportLab TTFont does not register woff/woff2.
+                    continue
+
+                name = os.path.splitext(fname)[0]
+                if name in _REGISTERED_FONTS:
+                    # Already registered in-process.
+                    continue
+                try:
+                    pdfmetrics.registerFont(TTFont(name, fpath))
+                    _REGISTERED_FONTS.add(name)
+                except Exception as exc:
+                    # If registration fails for this file, keep going.
+                    # Log once in DEBUG mode to aid troubleshooting.
+                    if fpath not in _FAILED_FONT_FILES:
+                        _FAILED_FONT_FILES.add(fpath)
+                        if bool(getattr(settings, 'DEBUG', False)):
+                            print(f"FONT REGISTER ERROR: {fpath} -> {exc}")
+                    continue
         except Exception:
             continue
 
@@ -172,24 +180,58 @@ def _resolve_font_name(font_family, font_style, font_weight):
             weight = 'normal'
 
     candidates = []
+    seen_candidates = set()
+
+    def add_candidate(name):
+        if name and name not in seen_candidates:
+            seen_candidates.add(name)
+            candidates.append(name)
+
     # Preferred naming: Family-BoldItalic, Family-Bold, Family-Italic, Family-Regular
-    name_base = fam.replace(' ', '')
-    if weight == 'bold' and style in ('italic', 'oblique'):
-        candidates.append(f"{name_base}-BoldItalic")
-        candidates.append(f"{name_base}BoldItalic")
-    if weight == 'bold':
-        candidates.append(f"{name_base}-Bold")
-        candidates.append(f"{name_base}Bold")
-    if style in ('italic', 'oblique'):
-        candidates.append(f"{name_base}-Italic")
-        candidates.append(f"{name_base}Italic")
-    # regular/default
-    candidates.append(f"{name_base}-Regular")
-    candidates.append(name_base)
+    name_bases = [fam]
+    compact_base = fam.replace(' ', '')
+    if compact_base != fam:
+        name_bases.append(compact_base)
+
+    for name_base in name_bases:
+        if weight == 'bold' and style in ('italic', 'oblique'):
+            add_candidate(f"{name_base}-BoldItalic")
+            add_candidate(f"{name_base}BoldItalic")
+        if weight == 'bold':
+            add_candidate(f"{name_base}-Bold")
+            add_candidate(f"{name_base}Bold")
+        if style in ('italic', 'oblique'):
+            add_candidate(f"{name_base}-Italic")
+            add_candidate(f"{name_base}Italic")
+        # regular/default
+        add_candidate(f"{name_base}-Regular")
+        add_candidate(name_base)
 
     for cand in candidates:
         if cand in _REGISTERED_FONTS:
             return cand
+
+    # Last-pass relaxed matching for filenames like Magnolia_Script or
+    # magnoliascript that don't exactly match frontend family naming.
+    compact = ''.join(ch for ch in fam.lower() if ch.isalnum())
+    if compact:
+        for registered in _REGISTERED_FONTS:
+            reg_compact = ''.join(ch for ch in registered.lower() if ch.isalnum())
+            if reg_compact.startswith(compact):
+                # Favor style/weight-compatible variants when possible.
+                r = registered.lower().replace('-', '').replace('_', '')
+                wants_bold = weight == 'bold'
+                wants_italic = style in ('italic', 'oblique')
+                has_bold = 'bold' in r
+                has_italic = 'italic' in r or 'oblique' in r
+                if wants_bold == has_bold and wants_italic == has_italic:
+                    return registered
+
+        # If no exact style/weight match, return any family match.
+        for registered in _REGISTERED_FONTS:
+            reg_compact = ''.join(ch for ch in registered.lower() if ch.isalnum())
+            if reg_compact.startswith(compact):
+                return registered
 
     return None
 
@@ -435,14 +477,22 @@ def build_certificate_pdf_bytes(cert):
         # Apply color
         pdf.setFillColor(_parse_color(marker.get('color')))
 
-        # Set font (fall back to Helvetica)
+        # Set font (fall back to built-in Helvetica variants)
         try:
             if font_name:
                 pdf.setFont(font_name, font_size)
             else:
-                # try bold/italic using built-in Times/Helvetica if requested
-                if (str(font_weight or '').lower() == 'bold'):
+                fw = str(font_weight or '').lower()
+                fs = str(font_style or '').lower()
+                is_bold = fw == 'bold' or (fw.isdigit() and int(fw) >= 700)
+                is_italic = fs in ('italic', 'oblique')
+
+                if is_bold and is_italic:
+                    pdf.setFont('Helvetica-BoldOblique', font_size)
+                elif is_bold:
                     pdf.setFont('Helvetica-Bold', font_size)
+                elif is_italic:
+                    pdf.setFont('Helvetica-Oblique', font_size)
                 else:
                     pdf.setFont('Helvetica', font_size)
         except Exception:

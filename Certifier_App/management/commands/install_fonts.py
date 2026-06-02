@@ -24,6 +24,8 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--dest', help='Relative destination folder (default: static/fonts)', default='static/fonts')
+        parser.add_argument('--extra', action='append', default=[],
+                            help='Extra font sources to download. Can be repeated. Format: <url> or <filename.ttf>=<url>')
 
     def handle(self, *args, **options):
         dest_folder = options.get('dest') or 'static/fonts'
@@ -37,6 +39,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Downloading Poppins fonts → {dest_path}")
         success = []
         failures = []
+        # First download bundled FONT_SOURCES
         for fname, url in FONT_SOURCES.items():
             out_file = os.path.join(dest_path, fname)
             try:
@@ -44,6 +47,26 @@ class Command(BaseCommand):
                 success.append(fname)
             except Exception as exc:
                 failures.append((fname, str(exc)))
+
+        # Then process extra fonts provided by user (allow multiple)
+        for item in options.get('extra') or []:
+            if '=' in item:
+                name, url = item.split('=', 1)
+                name = name.strip()
+            else:
+                url = item.strip()
+                name = os.path.basename(url.split('?')[0]) or None
+
+            if not name:
+                # fallback filename
+                name = f"font_{len(success) + len(failures) + 1}.ttf"
+
+            out_file = os.path.join(dest_path, name)
+            try:
+                _download_file(url, out_file)
+                success.append(name)
+            except Exception as exc:
+                failures.append((name, str(exc)))
 
         if success:
             self.stdout.write(self.style.SUCCESS(f"Downloaded: {', '.join(success)}"))
