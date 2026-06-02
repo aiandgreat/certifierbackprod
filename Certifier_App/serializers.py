@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
@@ -9,6 +10,7 @@ from .utils.eddsa import sign_data, VERIFY_KEY
 from .utils.pdf_renderer import generate_and_attach_certificate_pdf
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 # ================= CUSTOM JWT TOKEN SERIALIZER =================
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -79,26 +81,33 @@ class TemplateSerializer(serializers.ModelSerializer):
 
         # Normalize each marker to ensure font-related fields are preserved
         normalized = []
-        for m in value.get('markers', []):
-            if not isinstance(m, dict):
-                continue
-            marker = dict(m)  # shallow copy so we don't mutate input
+        try:
+            for m in value.get('markers', []):
+                if not isinstance(m, dict):
+                    continue
+                marker = dict(m)  # shallow copy so we don't mutate input
 
-            # Font-related defaults (frontend will provide these, but ensure fallbacks)
-            marker.setdefault('fontFamily', marker.get('fontFamily') or 'Helvetica')
-            marker.setdefault('fontStyle', marker.get('fontStyle') or 'normal')
-            marker.setdefault('fontWeight', marker.get('fontWeight') or 'normal')
-            marker.setdefault('fontSize', marker.get('fontSize') or 24)
-            marker.setdefault('color', marker.get('color') or '#000000')
-            marker.setdefault('align', marker.get('align') or 'left')
+                # Font-related defaults (frontend will provide these, but ensure fallbacks)
+                marker.setdefault('fontFamily', marker.get('fontFamily') or 'Helvetica')
+                marker.setdefault('fontStyle', marker.get('fontStyle') or 'normal')
+                marker.setdefault('fontWeight', marker.get('fontWeight') or 'normal')
+                marker.setdefault('fontSize', marker.get('fontSize') or 24)
+                marker.setdefault('color', marker.get('color') or '#000000')
+                marker.setdefault('align', marker.get('align') or 'left')
 
-            # Coerce numeric fontSize if possible
-            try:
-                marker['fontSize'] = float(marker['fontSize'])
-            except Exception:
-                marker['fontSize'] = 24.0
+                # Coerce numeric fontSize if possible
+                try:
+                    marker['fontSize'] = float(marker['fontSize'])
+                except Exception:
+                    marker['fontSize'] = 24.0
 
-            normalized.append(marker)
+                normalized.append(marker)
+        except Exception as e:
+            logger.error(f"Error normalizing placeholders: {e}")
+            # If normalization fails, we still want to return a valid object if possible
+            # or at least not crash.
+            if not normalized and markers:
+                return value
 
         value['markers'] = normalized
 

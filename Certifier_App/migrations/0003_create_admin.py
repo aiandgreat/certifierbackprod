@@ -23,7 +23,12 @@ def create_admin(apps, schema_editor):
         return
 
     # Create the superuser
-    User.objects.create_superuser(username=username, email=email, password=password)
+    User.objects.create_superuser(
+        username=username,
+        email=email,
+        password=password,
+        role='admin'
+    )
 
 
 def noop(apps, schema_editor):
