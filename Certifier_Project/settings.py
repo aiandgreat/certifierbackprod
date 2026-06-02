@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 from datetime import timedelta
 from dotenv import load_dotenv
+import dj_database_url
 
 # Load environment variables from .env file
 load_dotenv()
@@ -27,13 +28,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-7)(8+e-1t1zrm1sl-m5y^(s)++7qgwiwrokgzy0p^^zi=p#l45'
+# Read from environment for production; fall back to the existing key for local dev.
+SECRET_KEY = os.getenv('SECRET_KEY') or 'django-insecure-7)(8+e-1t1zrm1sl-m5y^(s)++7qgwiwrokgzy0p^^zi=p#l45'
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# DEBUG should be False in production. Set env var to 'True' or '1' to enable locally.
+DEBUG = str(os.getenv('DEBUG', 'True')).lower() in ('1', 'true', 'yes')
 
-CORS_ALLOW_ALL_ORIGINS = True
-ALLOWED_HOSTS = []
+# CORS / hosts
+# By default allow all origins in local/dev. For production set ALLOWED_HOSTS and CORS_ALLOWED_ORIGINS.
+CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'True').lower() in ('1', 'true', 'yes')
+ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '').split(',') if h.strip()]
 AUTH_USER_MODEL = 'Certifier_App.User'
 
 #TRY ONLY
@@ -80,6 +84,7 @@ GOOGLE_OAUTH_REDIRECT_URI = os.getenv(
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -113,17 +118,25 @@ WSGI_APPLICATION = 'Certifier_Project.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 
-# DATABASE FOR POSTGRESQL   
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'certifier_db',
-        'USER': 'postgres',
-        'PASSWORD': 'admin',
-        'HOST': 'localhost',
-        'PORT': '5432',
+# Database configuration
+# If a DATABASE_URL env var is present (Render provides one), prefer it. Otherwise
+# fall back to local postgres settings, but allow those values to be read from env.
+DATABASE_URL = os.getenv('DATABASE_URL')
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600),
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('POSTGRES_DB', 'certifier_db'),
+            'USER': os.getenv('POSTGRES_USER', 'postgres'),
+            'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'admin'),
+            'HOST': os.getenv('POSTGRES_HOST', 'localhost'),
+            'PORT': os.getenv('POSTGRES_PORT', '5432'),
+        }
+    }
 
 
 # Password validation
@@ -161,6 +174,14 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# Static files (collected) root for production
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+# Use WhiteNoise storage for compressed files when available
+STATICFILES_STORAGE = os.getenv(
+    'STATICFILES_STORAGE',
+    'whitenoise.storage.CompressedManifestStaticFilesStorage'
+)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
