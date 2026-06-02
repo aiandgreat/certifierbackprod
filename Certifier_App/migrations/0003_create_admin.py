@@ -10,8 +10,8 @@ def create_admin(apps, schema_editor):
     environment. If `ADMIN_PASSWORD` is not set, the migration is a no-op.
     """
     User = apps.get_model('Certifier_App', 'User')
-    username = os.environ.get('ADMIN_USERNAME', 'admin')
-    email = os.environ.get('ADMIN_EMAIL', 'admin@example.com')
+    username = os.environ.get('ADMIN_USERNAME', 'certifier_admin')
+    email = os.environ.get('ADMIN_EMAIL', 'admin@ua.edu.ph')
     password = os.environ.get('ADMIN_PASSWORD')
 
     if not password:
