@@ -208,6 +208,14 @@ STATICFILES_STORAGE = os.getenv(
     'STATICFILES_STORAGE',
     'whitenoise.storage.CompressedManifestStaticFilesStorage'
 )
+
+# Supabase Storage Settings (S3 Compatible)
+STORAGE_ACCESS_KEY_ID = os.getenv('SUPABASE_STORAGE_ACCESS_KEY_ID')
+STORAGE_SECRET_ACCESS_KEY = os.getenv('SUPABASE_STORAGE_SECRET_ACCESS_KEY')
+STORAGE_BUCKET_NAME = os.getenv('SUPABASE_STORAGE_BUCKET_NAME')
+STORAGE_ENDPOINT_URL = os.getenv('SUPABASE_STORAGE_ENDPOINT_URL')
+STORAGE_PUBLIC_DOMAIN = os.getenv('SUPABASE_STORAGE_PUBLIC_DOMAIN')
+
 STORAGES = {
     'default': {
         'BACKEND': 'django.core.files.storage.FileSystemStorage',
@@ -216,6 +224,22 @@ STORAGES = {
         'BACKEND': STATICFILES_STORAGE,
     },
 }
+
+# Use Supabase/S3 for Media if credentials are provided (Production)
+if STORAGE_ACCESS_KEY_ID and STORAGE_SECRET_ACCESS_KEY and STORAGE_BUCKET_NAME:
+    STORAGES['default'] = {
+        'BACKEND': 'storages.backends.s3.S3Storage',
+        'OPTIONS': {
+            'access_key': STORAGE_ACCESS_KEY_ID,
+            'secret_key': STORAGE_SECRET_ACCESS_KEY,
+            'bucket_name': STORAGE_BUCKET_NAME,
+            'endpoint_url': STORAGE_ENDPOINT_URL,
+            'region_name': 'auto',
+            'custom_domain': STORAGE_PUBLIC_DOMAIN,
+            'location': 'media',
+            'file_overwrite': False,
+        },
+    }
 
 # Trust the Render public origin automatically when running there.
 CSRF_TRUSTED_ORIGINS = _split_env_list('CSRF_TRUSTED_ORIGINS')

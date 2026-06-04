@@ -368,11 +368,12 @@ def _load_background_reader(template):
         return None, None, None
 
     try:
-        # Get actual file path
-        image_path = template.background.path  # IMPORTANT
+        # Read file into memory buffer to support both local and remote storage
+        with template.background.open('rb') as f:
+            image_data = BytesIO(f.read())
 
         # Convert to ReportLab-compatible object
-        reader = ImageReader(image_path)
+        reader = ImageReader(image_data)
 
         # Get image dimensions
         width, height = reader.getSize()

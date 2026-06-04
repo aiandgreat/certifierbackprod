@@ -12,3 +12,5 @@ reportlab
 PyNaCl
 Pillow
 whitenoise
+django-storages[s3]
+boto3
