@@ -36,6 +36,7 @@ urlpatterns = [
     # ================= BULK UPLOAD =================
     path('uploads/', views.BulkUploadListView.as_view()),
     path('uploads/create/', views.BulkUploadCreateView.as_view()),
+    path('uploads/<uuid:pk>/', views.BulkUploadDeleteView.as_view()),
     path('uploads/<uuid:pk>/process/', views.process_bulk_upload),
     
     #ALL USERS

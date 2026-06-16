@@ -605,6 +605,18 @@ class BulkUploadCreateView(generics.CreateAPIView):
         serializer.save(uploaded_by=self.request.user)
 
 
+class BulkUploadDeleteView(generics.DestroyAPIView):
+    queryset = BulkUpload.objects.all()
+    serializer_class = BulkUploadSerializer
+    permission_classes = [IsAdminUserRole]
+
+    def perform_destroy(self, instance):
+        # Burahin ang CSV file sa storage
+        if instance.csv_file:
+            instance.csv_file.delete(save=False)
+        instance.delete()
+
+
 # ================= GENERATE CERTS FROM CSV =================
 @api_view(['POST'])
 @permission_classes([IsAdminUserRole])
