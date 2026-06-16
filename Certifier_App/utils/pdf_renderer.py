@@ -384,7 +384,7 @@ def _load_background_reader(template):
         print("BACKGROUND LOAD ERROR:", e)
         return None, None, None
 
-def build_certificate_pdf_bytes(cert):
+def build_certificate_pdf_bytes(cert, bg_info=None):
     # Get linked template
     template = cert.template
 
@@ -397,8 +397,12 @@ def build_certificate_pdf_bytes(cert):
     # Default page size
     page_width, page_height = letter
 
-    # Load background image
-    bg_reader, bg_width, bg_height = _load_background_reader(template)
+    # Load background image or use provided info
+    if bg_info:
+        bg_reader, bg_width, bg_height = bg_info
+    else:
+        bg_reader, bg_width, bg_height = _load_background_reader(template)
+
     if bg_reader is not None and bg_width and bg_height:
         background_reader = bg_reader
 
@@ -410,7 +414,7 @@ def build_certificate_pdf_bytes(cert):
     else:
         page_width, page_height = letter  # fallback safety
 
-        # Load placeholder markers from template JSON
+    # Load placeholder markers from template JSON
     if template and isinstance(template.placeholders, dict):
         raw_markers = template.placeholders.get('markers', [])
         if isinstance(raw_markers, list):
@@ -452,7 +456,7 @@ def build_certificate_pdf_bytes(cert):
         value = _certificate_field_value(cert, key)
         if not value:
             continue
-        
+
          # Convert percentage → actual coordinates
         x_pct = _clamp_pct(marker.get('xPct'), default=50.0)
         y_pct = _clamp_pct(marker.get('yPct'), default=50.0)
@@ -524,9 +528,9 @@ def build_certificate_pdf_bytes(cert):
     return buffer.getvalue()
 
 
-def generate_and_attach_certificate_pdf(cert):
+def generate_and_attach_certificate_pdf(cert, bg_info=None):
      # Generate PDF bytes
-    pdf_bytes = build_certificate_pdf_bytes(cert)
+    pdf_bytes = build_certificate_pdf_bytes(cert, bg_info=bg_info)
     # Save PDF to model file field
     cert.file.save(
         f"{cert.certificate_id}.pdf",

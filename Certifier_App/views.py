@@ -1,6 +1,7 @@
 import csv
 import hashlib
 import uuid
+import threading
 from django.http import FileResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -22,7 +23,7 @@ from .serializers import (
 )
 
 from .utils.eddsa import sign_data, VERIFY_KEY, verify_signature
-from .utils.pdf_renderer import generate_and_attach_certificate_pdf
+from .utils.pdf_renderer import generate_and_attach_certificate_pdf, _load_background_reader
 from .utils.google_oauth import (
     get_google_auth_url,
     exchange_code_for_token,
@@ -36,6 +37,71 @@ from django.views.decorators.clickjacking import xframe_options_exempt
 import secrets
 
 User = get_user_model()
+
+
+# ================= BULK UPLOAD BACKGROUND TASK =================
+def run_bulk_upload_task(upload_id, user_id, reader_list):
+    """
+    Background task to process bulk certificate generation.
+    Optimized for memory and designed to avoid request timeouts.
+    """
+    from django.db import connection
+    from .models import BulkUpload, Certificate
+    from .utils.pdf_renderer import generate_and_attach_certificate_pdf, _load_background_reader
+    from .utils.eddsa import sign_data, VERIFY_KEY
+    import hashlib
+
+    User = get_user_model()
+    
+    try:
+        upload = BulkUpload.objects.get(pk=upload_id)
+        user = User.objects.get(pk=user_id)
+        
+        # Pre-load background image once for the entire batch to save memory/time
+        bg_info = _load_background_reader(upload.template)
+        
+        for row in reader_list:
+            cert = Certificate.objects.create(
+                template=upload.template,
+                title=row.get('title', ''),
+                full_name=row.get('full_name', ''),
+                course=row.get('course', ''),
+                issued_by=row.get('issued_by', ''),
+                date_issued=row.get('date_issued', ''),
+                created_by=user,
+                owner=user
+            )
+
+            # EdDSA signing and hash
+            data_string = cert.get_data_string()
+            cert.data_hash = hashlib.sha256(data_string.encode()).hexdigest()
+            cert.original_data_hash = cert.data_hash
+            cert.signature = sign_data(data_string)
+            cert.public_key = VERIFY_KEY.encode().hex()
+            cert.save()
+
+            # Pass pre-loaded bg_info to optimize PDF generation
+            generate_and_attach_certificate_pdf(cert, bg_info=bg_info)
+
+            # Update processed_records dynamically
+            upload.processed_records += 1
+            upload.save(update_fields=['processed_records'])
+
+        # Mark as completed
+        upload.status = "COMPLETED"
+        upload.save(update_fields=['status'])
+
+    except Exception as e:
+        print(f"BULK UPLOAD BACKGROUND TASK ERROR: {str(e)}")
+        try:
+            upload = BulkUpload.objects.get(pk=upload_id)
+            upload.status = "FAILED"
+            upload.save(update_fields=['status'])
+        except:
+            pass
+    finally:
+        # Close DB connection in the thread to prevent leakage
+        connection.close()
 
 
 # ================= GOOGLE OAUTH HELPERS =================
@@ -549,50 +615,27 @@ def process_bulk_upload(request, pk):
         # Read CSV and count total rows
         with upload.csv_file.open() as file:
             decoded = file.read().decode('utf-8').splitlines()
-            reader = list(csv.DictReader(decoded))  # Convert to list to count rows
+            # Convert to list to ensure it's fully read before passing to thread
+            reader_list = list(csv.DictReader(decoded))
 
         upload.status = "PROCESSING"
-        upload.total_records = len(reader)
+        upload.total_records = len(reader_list)
         upload.processed_records = 0
         upload.save()
 
-        created = []
+        # Start background task to avoid request timeout and handle large batches safely
+        # We pass request.user.id because request object shouldn't be used in threads
+        thread = threading.Thread(
+            target=run_bulk_upload_task,
+            args=(upload.id, request.user.id, reader_list)
+        )
+        thread.start()
 
-        for row in reader:
-            user = request.user  
-
-            cert = Certificate.objects.create(
-                template=upload.template,
-                title=row['title'],
-                full_name=row['full_name'],
-                course=row['course'],
-                issued_by=row['issued_by'],
-                date_issued=row['date_issued'],
-                created_by=user,
-                owner=user
-            )
-
-            # EdDSA signing and hash
-            data_string = cert.get_data_string()
-            cert.data_hash = hashlib.sha256(data_string.encode()).hexdigest()
-            cert.original_data_hash = cert.data_hash
-            cert.signature = sign_data(data_string)
-            cert.public_key = VERIFY_KEY.encode().hex()
-            cert.save()
-
-            generate_and_attach_certificate_pdf(cert)
-
-            created.append(cert.certificate_id)
-
-            # Update processed_records dynamically
-            upload.processed_records += 1
-            upload.save(update_fields=['processed_records'])
-
-        # Mark as completed
-        upload.status = "COMPLETED"
-        upload.save(update_fields=['status'])
-
-        return Response({"created": created})
+        return Response({
+            "message": "Bulk processing started in background.",
+            "upload_id": upload.id,
+            "total_records": upload.total_records
+        })
 
     except Exception as e:
         # Mark upload as failed in case of error
