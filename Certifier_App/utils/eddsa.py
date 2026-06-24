@@ -15,7 +15,7 @@ if SIGNING_KEY_HEX:
 else:
     # If no key exists, generate a new random signing key
     SIGNING_KEY = SigningKey.generate()
-    print("⚠️ WARNING: No persistent signing key set!")
+    print("WARNING: No persistent signing key set!")
     print("SAVE THIS KEY:", SIGNING_KEY.encode().hex())
 
     # Extract the public key from the signing key (used for verification)

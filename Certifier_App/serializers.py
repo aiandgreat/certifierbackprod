@@ -140,7 +140,8 @@ class CertificateCreateSerializer(serializers.ModelSerializer):
             'course',
             'issued_by',
             'date_issued',
-            'owner'
+            'owner',
+            'recipient_email'
         ]
 
     def create(self, validated_data):
@@ -149,6 +150,18 @@ class CertificateCreateSerializer(serializers.ModelSerializer):
 
         # Remove duplicate fields just in case
         validated_data.pop('created_by', None)
+
+        recipient_email = validated_data.get('recipient_email', '')
+        if recipient_email:
+            recipient_email = recipient_email.strip()
+            validated_data['recipient_email'] = recipient_email
+            
+            if not validated_data.get('owner'):
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                recipient_user = User.objects.filter(email__iexact=recipient_email).first()
+                if recipient_user:
+                    validated_data['owner'] = recipient_user
 
         # ✅ CREATE CERTIFICATE
         cert = Certificate.objects.create(

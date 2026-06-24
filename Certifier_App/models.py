@@ -93,6 +93,7 @@ class Certificate(models.Model):
         blank=True,
         related_name='certificates'
     )
+    recipient_email = models.EmailField(null=True, blank=True, db_index=True)
 
     file = models.FileField(upload_to='certificates/', null=True, blank=True)
 
@@ -159,3 +160,17 @@ class BulkUpload(models.Model):
 
     def __str__(self):
         return f"Upload {self.id} - {self.status}"
+
+
+# ================= SIGNALS =====================================================
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+@receiver(post_save, sender=User)
+def claim_certificates_for_new_user(sender, instance, created, **kwargs):
+    """
+    Automatically search for and assign certificates to a newly registered user
+    if their email matches the recipient_email field of any unclaimed certificates.
+    """
+    if created and instance.role == 'student':
+        Certificate.objects.filter(recipient_email__iexact=instance.email, owner__isnull=True).update(owner=instance)

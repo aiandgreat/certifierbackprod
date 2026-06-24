@@ -61,6 +61,13 @@ def run_bulk_upload_task(upload_id, user_id, reader_list):
         bg_info = _load_background_reader(upload.template)
         
         for row in reader_list:
+            email_val = (row.get('email') or row.get('recipient_email') or '').strip()
+            recipient_email = email_val if email_val else None
+            
+            recipient_user = None
+            if recipient_email:
+                recipient_user = User.objects.filter(email__iexact=recipient_email).first()
+
             cert = Certificate.objects.create(
                 template=upload.template,
                 title=row.get('title', ''),
@@ -69,7 +76,8 @@ def run_bulk_upload_task(upload_id, user_id, reader_list):
                 issued_by=row.get('issued_by', ''),
                 date_issued=row.get('date_issued', ''),
                 created_by=user,
-                owner=user
+                owner=recipient_user,
+                recipient_email=recipient_email
             )
 
             # EdDSA signing and hash
@@ -101,7 +109,9 @@ def run_bulk_upload_task(upload_id, user_id, reader_list):
             pass
     finally:
         # Close DB connection in the thread to prevent leakage
-        connection.close()
+        import sys
+        if 'test' not in sys.argv:
+            connection.close()
 
 
 # ================= GOOGLE OAUTH HELPERS =================
@@ -418,6 +428,20 @@ def reissue_certificate(request, pk):
     cert = get_object_or_404(Certificate, pk=pk)
     
     try:
+        recipient_email = request.data.get('recipient_email')
+        if recipient_email is not None:
+            recipient_email = recipient_email.strip()
+        else:
+            recipient_email = cert.recipient_email
+
+        owner_id = request.data.get('owner')
+        if not owner_id and recipient_email:
+            recipient_user = User.objects.filter(email__iexact=recipient_email).first()
+            if recipient_user:
+                owner_id = recipient_user.id
+        else:
+            owner_id = owner_id or cert.owner_id
+
         # Create new certificate with updated data
         new_cert = Certificate.objects.create(
             template=cert.template,
@@ -427,7 +451,8 @@ def reissue_certificate(request, pk):
             issued_by=request.data.get('issued_by', cert.issued_by),
             date_issued=request.data.get('date_issued', cert.date_issued),
             created_by=request.user,
-            owner_id=request.data.get('owner') or cert.owner_id
+            owner_id=owner_id,
+            recipient_email=recipient_email
         )
         
         # EdDSA signing and hash
