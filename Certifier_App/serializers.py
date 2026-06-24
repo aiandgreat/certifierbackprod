@@ -125,9 +125,26 @@ class TemplateSerializer(serializers.ModelSerializer):
 
 # ================= CERTIFICATE =================
 class CertificateSerializer(serializers.ModelSerializer):
+    template_details = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Certificate
         fields = '__all__'
+
+    def get_template_details(self, obj):
+        if obj.template:
+            request = self.context.get('request')
+            event_logo_url = None
+            if obj.template.event_logo:
+                event_logo_url = obj.template.event_logo.url
+                if request:
+                    event_logo_url = request.build_absolute_uri(event_logo_url)
+            return {
+                'id': obj.template.id,
+                'name': obj.template.name,
+                'event_logo': event_logo_url
+            }
+        return None
 
 
 class CertificateCreateSerializer(serializers.ModelSerializer):

@@ -34,6 +34,12 @@ class Template(models.Model):
         blank=True
     )
 
+    event_logo = models.ImageField(
+        upload_to='templates/event_logos/',
+        null=True,
+        blank=True
+    )
+
     placeholders = models.JSONField()
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)

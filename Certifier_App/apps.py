@@ -11,7 +11,7 @@ class CertifierAppConfig(AppConfig):
         # Ensure media directories exist for template uploads
         media_root = getattr(settings, 'MEDIA_ROOT', None)
         if media_root:
-            subdirs = ['templates', 'templates/signatures', 'certificates', 'csv_uploads']
+            subdirs = ['templates', 'templates/signatures', 'templates/event_logos', 'certificates', 'csv_uploads']
             for subdir in subdirs:
                 path = os.path.join(media_root, subdir)
                 if not os.path.exists(path):
