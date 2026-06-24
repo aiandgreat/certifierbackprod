@@ -136,7 +136,7 @@ def get_or_create_user_from_google(google_user_data):
     
     # Extract name from Google data
     name = google_user_data.get('name', email.split('@')[0])
-    name_parts = name.split(' ', 1)
+    name_parts = name.strip().rsplit(' ', 1)
     first_name = name_parts[0] if name_parts else 'User'
     last_name = name_parts[1] if len(name_parts) > 1 else ''
     

@@ -129,3 +129,15 @@ class CertificateAutomationTestCase(APITestCase):
         # 5. Verify the certificate is now automatically owned by the registered student
         cert.refresh_from_db()
         self.assertEqual(cert.owner, student)
+
+    def test_google_oauth_name_parsing(self):
+        from .views import get_or_create_user_from_google
+        
+        # Test full name with multiple first/middle names and one last name
+        google_data = {
+            'email': 'aian.jae@ua.edu.ph',
+            'name': 'AIAN JAE S. GARCIA'
+        }
+        user, created = get_or_create_user_from_google(google_data)
+        self.assertEqual(user.first_name, 'AIAN JAE S.')
+        self.assertEqual(user.last_name, 'GARCIA')
