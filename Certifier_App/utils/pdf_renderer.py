@@ -332,9 +332,7 @@ def _draw_qr_from_marker(pdf, marker, page_width, page_height, verify_url):
             except ValueError:
                 pass
 
-    if is_light_color:
-        # Force the modules to be black for high contrast scannability
-        qr_color = colors.black
+    # We do NOT force light colors to black so that the QR code retains its selected light/white color.
 
     try:
         widget.barFillColor = qr_color
@@ -366,12 +364,12 @@ def _draw_qr_from_marker(pdf, marker, page_width, page_height, verify_url):
         draw_x = x - (qr_width / 2.0)
         draw_y = y - (qr_height / 2.0)
 
-    # If the color is too light, draw a solid white background square 
-    # as a quiet zone to ensure standard dark-on-light scannability
+    # If the color is too light, draw a solid black background square 
+    # as a quiet zone to ensure high-contrast scannability of the light QR modules
     if is_light_color:
         pdf.saveState()
-        pdf.setFillColor(colors.white)
-        padding = 4  # 4 points padding for quiet zone
+        pdf.setFillColor(colors.black)
+        padding = 6  # 6 points padding for quiet zone (inverted QR codes need slightly more padding)
         pdf.rect(draw_x - padding, draw_y - padding, qr_width + (padding * 2), qr_height + (padding * 2), fill=True, stroke=False)
         pdf.restoreState()
 
