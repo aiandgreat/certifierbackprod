@@ -169,7 +169,7 @@ class BulkUpload(models.Model):
 
 
 # ================= SIGNALS =====================================================
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 
 @receiver(post_save, sender=User)
@@ -180,3 +180,50 @@ def claim_certificates_for_new_user(sender, instance, created, **kwargs):
     """
     if created and instance.role == 'student':
         Certificate.objects.filter(recipient_email__iexact=instance.email, owner__isnull=True).update(owner=instance)
+
+
+@receiver(post_delete, sender=Template)
+def delete_template_files(sender, instance, **kwargs):
+    """
+    Automatically delete background, signature_image, and event_logo files
+    from storage when a Template is deleted.
+    """
+    if instance.background:
+        try:
+            instance.background.delete(save=False)
+        except Exception:
+            pass
+    if instance.signature_image:
+        try:
+            instance.signature_image.delete(save=False)
+        except Exception:
+            pass
+    if instance.event_logo:
+        try:
+            instance.event_logo.delete(save=False)
+        except Exception:
+            pass
+
+
+@receiver(post_delete, sender=Certificate)
+def delete_certificate_file(sender, instance, **kwargs):
+    """
+    Automatically delete the certificate PDF file from storage when a Certificate is deleted.
+    """
+    if instance.file:
+        try:
+            instance.file.delete(save=False)
+        except Exception:
+            pass
+
+
+@receiver(post_delete, sender=BulkUpload)
+def delete_bulkupload_file(sender, instance, **kwargs):
+    """
+    Automatically delete the CSV file from storage when a BulkUpload is deleted.
+    """
+    if instance.csv_file:
+        try:
+            instance.csv_file.delete(save=False)
+        except Exception:
+            pass

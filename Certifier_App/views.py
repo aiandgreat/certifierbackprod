@@ -412,11 +412,7 @@ class CertificateDetailView(generics.RetrieveUpdateDestroyAPIView):
         if self.request.user.role != 'admin':
             raise PermissionDenied("Only admins can delete certificates")
         
-        # 2. (Optional pero Recommended) Burahin din ang file sa storage
-        if instance.file:
-            instance.file.delete(save=False)
-            
-        # 3. Burahin ang record sa database
+        # 2. Burahin ang record sa database (post_delete signal cleans up storage)
         instance.delete()
 
 
@@ -636,9 +632,7 @@ class BulkUploadDeleteView(generics.DestroyAPIView):
     permission_classes = [IsAdminUserRole]
 
     def perform_destroy(self, instance):
-        # Burahin ang CSV file sa storage
-        if instance.csv_file:
-            instance.csv_file.delete(save=False)
+        # post_delete signal cleans up storage
         instance.delete()
 
 
