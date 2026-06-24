@@ -308,32 +308,6 @@ def _draw_qr_from_marker(pdf, marker, page_width, page_height, verify_url):
 
     widget = qr_lib.QrCodeWidget(verify_url)
     qr_color = _parse_color(marker.get('color'))
-    
-    # Detect if the color is too light (which makes it unscannable on white templates
-    # and also unreadable as inverted QR on dark templates by most phone cameras)
-    color_val = str(marker.get('color') or '').strip().lower()
-    is_light_color = color_val in ('white', 'yellow', 'lightgray', 'lightgrey', 'cyan', '#fff', '#ffffff')
-    
-    if not is_light_color and color_val.startswith('#'):
-        color_hex = color_val.lstrip('#')
-        if len(color_hex) in (3, 6):
-            try:
-                if len(color_hex) == 3:
-                    r = int(color_hex[0] * 2, 16)
-                    g = int(color_hex[1] * 2, 16)
-                    b = int(color_hex[2] * 2, 16)
-                else:
-                    r = int(color_hex[0:2], 16)
-                    g = int(color_hex[2:4], 16)
-                    b = int(color_hex[4:6], 16)
-                luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
-                if luminance > 0.75:
-                    is_light_color = True
-            except ValueError:
-                pass
-
-    # We do NOT force light colors to black so that the QR code retains its selected light/white color.
-
     try:
         widget.barFillColor = qr_color
         widget.barStrokeColor = qr_color
@@ -363,15 +337,6 @@ def _draw_qr_from_marker(pdf, marker, page_width, page_height, verify_url):
     else:
         draw_x = x - (qr_width / 2.0)
         draw_y = y - (qr_height / 2.0)
-
-    # If the color is too light, draw a solid black background square 
-    # as a quiet zone to ensure high-contrast scannability of the light QR modules
-    if is_light_color:
-        pdf.saveState()
-        pdf.setFillColor(colors.black)
-        padding = 6  # 6 points padding for quiet zone (inverted QR codes need slightly more padding)
-        pdf.rect(draw_x - padding, draw_y - padding, qr_width + (padding * 2), qr_height + (padding * 2), fill=True, stroke=False)
-        pdf.restoreState()
 
     renderPDF.draw(drawing, pdf, draw_x, draw_y)
 
