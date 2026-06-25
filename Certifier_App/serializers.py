@@ -5,17 +5,24 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
 
-from .models import Template, Certificate, BulkUpload
+from .models import Template, Certificate, BulkUpload, Department
 from .utils.eddsa import sign_data, VERIFY_KEY
 from .utils.pdf_renderer import generate_and_attach_certificate_pdf
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
+# ================= DEPARTMENT =================
+class DepartmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Department
+        fields = '__all__'
+
+
 # ================= CUSTOM JWT TOKEN SERIALIZER =================
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """
-    Custom serializer that includes user role and full_name in token response
+    Custom serializer that includes user role, full_name, and department details in token response
     """
     def validate(self, attrs):
         data = super().validate(attrs)
@@ -24,14 +31,25 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         data['username'] = self.user.username
         data['role'] = self.user.role
         data['full_name'] = f"{self.user.first_name} {self.user.last_name}".strip() or self.user.username
+        
+        if self.user.department:
+            data['department_id'] = str(self.user.department.id)
+            data['department_name'] = self.user.department.name
+            data['department_abbreviation'] = self.user.department.abbreviation
+        else:
+            data['department_id'] = None
+            data['department_name'] = None
+            data['department_abbreviation'] = None
         return data
 
 
 # ================= USER =================
 class UserSerializer(serializers.ModelSerializer):
+    department_details = DepartmentSerializer(source='department', read_only=True)
+
     class Meta:
         model = User
-        fields = ['id', 'email', 'username', 'first_name', 'last_name', 'role', 'password']
+        fields = ['id', 'email', 'username', 'first_name', 'last_name', 'role', 'department', 'department_details', 'password']
         extra_kwargs = {'password': {'write_only': True, 'required': False}}
 
     def update(self, instance, validated_data):
@@ -53,11 +71,23 @@ class UserSerializer(serializers.ModelSerializer):
 # ================= TEMPLATE =================
 class TemplateSerializer(serializers.ModelSerializer):
     placeholders = serializers.JSONField(required=False)
+    department_details = DepartmentSerializer(source='department', read_only=True)
 
     class Meta:
         model = Template
         fields = '__all__'
         read_only_fields = ['id', 'created_by', 'created_at']
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        if request and request.user:
+            user = request.user
+            if user.role == 'sub_admin':
+                attrs['department'] = user.department
+            elif user.role == 'admin':
+                if not self.instance and not attrs.get('department'):
+                    raise serializers.ValidationError({"department": "This field is required for administrators."})
+        return attrs
 
     def validate_placeholders(self, value):
         # Normalize empty values so template upload does not fail with server errors.
@@ -126,6 +156,7 @@ class TemplateSerializer(serializers.ModelSerializer):
 # ================= CERTIFICATE =================
 class CertificateSerializer(serializers.ModelSerializer):
     template_details = serializers.SerializerMethodField(read_only=True)
+    department_details = DepartmentSerializer(source='department', read_only=True)
 
     class Meta:
         model = Certificate
@@ -142,7 +173,8 @@ class CertificateSerializer(serializers.ModelSerializer):
             return {
                 'id': obj.template.id,
                 'name': obj.template.name,
-                'event_logo': event_logo_url
+                'event_logo': event_logo_url,
+                'department': obj.template.department.id if obj.template.department else None
             }
         return None
 
@@ -158,8 +190,19 @@ class CertificateCreateSerializer(serializers.ModelSerializer):
             'issued_by',
             'date_issued',
             'owner',
-            'recipient_email'
+            'recipient_email',
+            'department'
         ]
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        if request and request.user:
+            user = request.user
+            template = attrs.get('template')
+            if template and user.role == 'sub_admin':
+                if template.department != user.department:
+                    raise serializers.ValidationError({"template": "You can only issue certificates using templates from your department."})
+        return attrs
 
     def create(self, validated_data):
         request = self.context.get('request')
@@ -179,6 +222,11 @@ class CertificateCreateSerializer(serializers.ModelSerializer):
                 recipient_user = User.objects.filter(email__iexact=recipient_email).first()
                 if recipient_user:
                     validated_data['owner'] = recipient_user
+
+        # Set default department from template if not provided
+        template = validated_data.get('template')
+        if template and not validated_data.get('department'):
+            validated_data['department'] = template.department
 
         # ✅ CREATE CERTIFICATE
         cert = Certificate.objects.create(
@@ -255,6 +303,16 @@ class BulkUploadCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = BulkUpload
         fields = ['id', 'csv_file', 'template']
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        if request and request.user:
+            user = request.user
+            template = attrs.get('template')
+            if template and user.role == 'sub_admin':
+                if template.department != user.department:
+                    raise serializers.ValidationError({"template": "You can only use templates from your department."})
+        return attrs
 
     def create(self, validated_data):
         request = self.context.get('request')

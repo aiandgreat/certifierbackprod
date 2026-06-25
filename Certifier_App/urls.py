@@ -27,6 +27,10 @@ urlpatterns = [
     path('certificates/<uuid:pk>/preview/', views.preview_certificate),
     path('certificates/<uuid:pk>/reissue/', views.reissue_certificate),
 
+    # ================= DEPARTMENT =================
+    path('departments/', views.DepartmentListView.as_view(), name='department-list'),
+    path('departments/<uuid:pk>/', views.DepartmentDetailView.as_view(), name='department-detail'),
+
 
     # ================= TEMPLATE ================= 
     path('templates/', views.TemplateView.as_view()),

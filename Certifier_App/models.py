@@ -5,13 +5,31 @@ import uuid
 from django.contrib.auth.models import AbstractUser
 
 
+# ================= DEPARTMENT ==================================================
+class Department(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255, unique=True)
+    abbreviation = models.CharField(max_length=50, unique=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.abbreviation})"
+
+
 # ================= USER ========================================================
 class User(AbstractUser):
     email = models.EmailField(unique=True)
     role = models.CharField(max_length=20, choices=[
         ('student', 'Student'),
-        ('admin', 'Administrator')
+        ('admin', 'Administrator'),
+        ('sub_admin', 'Sub-Administrator')
     ])
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='users'
+    )
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
@@ -41,6 +59,14 @@ class Template(models.Model):
     )
 
     placeholders = models.JSONField()
+
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='templates'
+    )
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
 
@@ -103,6 +129,14 @@ class Certificate(models.Model):
 
     file = models.FileField(upload_to='certificates/', null=True, blank=True)
 
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='certificates'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -115,10 +149,11 @@ class Certificate(models.Model):
         compared to the original signed hash. If the current data no longer
         matches `original_data_hash`, mark the certificate as INVALID.
 
-        This makes edits from the Django admin (or any direct model save)
-        immediately reflect tampering without requiring an external verify
-        API call.
+        Also ensures the department is automatically copied from the template.
         """
+        if self.template and not self.department:
+            self.department = self.template.department
+
         # Only run the tamper check for existing records that have an original hash
         if self.pk and self.original_data_hash:
             try:

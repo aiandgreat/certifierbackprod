@@ -12,14 +12,15 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Template, Certificate, BulkUpload
+from .models import Template, Certificate, BulkUpload, Department
 from .serializers import (
     CertificateSerializer,
     CertificateCreateSerializer,
     TemplateSerializer,
     BulkUploadSerializer,
     BulkUploadCreateSerializer,
-    CertificatePreviewSerializer
+    CertificatePreviewSerializer,
+    DepartmentSerializer
 )
 
 from .utils.eddsa import sign_data, VERIFY_KEY, verify_signature
@@ -305,6 +306,11 @@ class IsAdminUserRole(BasePermission):
         return request.user.is_authenticated and request.user.role == 'admin'
 
 
+class IsAdminOrSubAdmin(BasePermission):
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and request.user.role in ['admin', 'sub_admin']
+
+
 # ================= AUTH: REGISTER =================
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -317,6 +323,7 @@ def register(request):
     first_name = (request.data.get('first_name') or '').strip()
     last_name = (request.data.get('last_name') or '').strip()
     role = request.data.get('role', 'student')  # Default to student
+    department_id = request.data.get('department')
 
     if not email or not password or not first_name or not last_name:
         return Response(
@@ -336,9 +343,25 @@ def register(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    if role not in ['student', 'admin']:
+    if role not in ['student', 'admin', 'sub_admin']:
         return Response(
-            {"error": "Role must be 'student' or 'admin'"},
+            {"error": "Role must be 'student', 'admin', or 'sub_admin'"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    department = None
+    if department_id:
+        try:
+            department = Department.objects.get(id=department_id)
+        except (Department.DoesNotExist, ValueError):
+            return Response(
+                {"error": "Invalid department ID"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    if role == 'sub_admin' and not department:
+        return Response(
+            {"error": "Department is required for sub-administrators."},
             status=status.HTTP_400_BAD_REQUEST
         )
 
@@ -348,7 +371,8 @@ def register(request):
         password=password,
         first_name=first_name,
         last_name=last_name,
-        role=role
+        role=role,
+        department=department
     )
 
     return Response({
@@ -358,7 +382,8 @@ def register(request):
         "first_name": user.first_name,
         "last_name": user.last_name,
         "full_name": f"{user.first_name} {user.last_name}".strip(),
-        "role": user.role
+        "role": user.role,
+        "department": user.department.id if user.department else None
     }, status=status.HTTP_201_CREATED)
 
 
@@ -382,13 +407,15 @@ class CertificateListView(generics.ListAPIView):
 
         if user.role == 'admin':
             return Certificate.objects.all()
+        elif user.role == 'sub_admin':
+            return Certificate.objects.filter(department=user.department)
         return Certificate.objects.filter(owner=user)
 
 
 class CertificateCreateView(generics.CreateAPIView):
     queryset = Certificate.objects.all()
     serializer_class = CertificateCreateSerializer
-    permission_classes = [IsAdminUserRole]
+    permission_classes = [IsAdminOrSubAdmin]
 
     def perform_create(self, serializer):
         serializer.save(
@@ -398,30 +425,45 @@ class CertificateCreateView(generics.CreateAPIView):
 
 
 class CertificateDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Certificate.objects.all() # Idagdag ang queryset dito
     serializer_class = CertificateSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'admin':
+            return Certificate.objects.all()
+        elif user.role == 'sub_admin':
+            return Certificate.objects.filter(department=user.department)
+        return Certificate.objects.filter(owner=user)
+
     def perform_update(self, serializer):
-        if self.request.user.role != 'admin':
-            raise PermissionDenied("Only admins can edit certificates")
+        user = self.request.user
+        if user.role not in ['admin', 'sub_admin']:
+            raise PermissionDenied("Only admins and sub-admins can edit certificates")
+        if user.role == 'sub_admin' and serializer.instance.department != user.department:
+            raise PermissionDenied("You can only edit certificates within your department")
         serializer.save()
 
     def perform_destroy(self, instance):
-        # 1. Check kung admin ang nagbubura
-        if self.request.user.role != 'admin':
-            raise PermissionDenied("Only admins can delete certificates")
+        user = self.request.user
+        if user.role not in ['admin', 'sub_admin']:
+            raise PermissionDenied("Only admins and sub-admins can delete certificates")
+        if user.role == 'sub_admin' and instance.department != user.department:
+            raise PermissionDenied("You can only delete certificates within your department")
         
-        # 2. Burahin ang record sa database (post_delete signal cleans up storage)
+        # Burahin ang record sa database (post_delete signal cleans up storage)
         instance.delete()
 
 
 # ================= REISSUE CERTIFICATE =================
 @api_view(['POST'])
-@permission_classes([IsAdminUserRole])
+@permission_classes([IsAdminOrSubAdmin])
 def reissue_certificate(request, pk):
     """Reissue a certificate with updated information"""
     cert = get_object_or_404(Certificate, pk=pk)
+    
+    if request.user.role == 'sub_admin' and cert.department != request.user.department:
+        raise PermissionDenied("You can only reissue certificates for your department.")
     
     try:
         recipient_email = request.data.get('recipient_email')
@@ -562,7 +604,8 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
 def download_certificate(request, pk):
     cert = get_object_or_404(Certificate, pk=pk)
 
-    if cert.owner != request.user and request.user.role != 'admin':
+    is_subadmin_of_dept = request.user.role == 'sub_admin' and cert.department == request.user.department
+    if cert.owner != request.user and request.user.role != 'admin' and not is_subadmin_of_dept:
         return Response({"error": "Unauthorized"}, status=403)
 
     file_obj = _get_or_generate_certificate_pdf(cert)
@@ -580,7 +623,8 @@ def download_certificate(request, pk):
 def preview_certificate(request, pk):
     cert = get_object_or_404(Certificate, pk=pk)
 
-    if cert.owner != request.user and request.user.role != 'admin':
+    is_subadmin_of_dept = request.user.role == 'sub_admin' and cert.department == request.user.department
+    if cert.owner != request.user and request.user.role != 'admin' and not is_subadmin_of_dept:
         return Response({"error": "Unauthorized"}, status=403)
 
     file_obj = _get_or_generate_certificate_pdf(cert)
@@ -592,44 +636,91 @@ def preview_certificate(request, pk):
     )
 
 
-# ================= TEMPLATE =================
-class TemplateView(generics.ListCreateAPIView):
-    queryset = Template.objects.all()
-    serializer_class = TemplateSerializer
+# ================= DEPARTMENT =================
+class DepartmentListView(generics.ListCreateAPIView):
+    queryset = Department.objects.all()
+    serializer_class = DepartmentSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsAdminUserRole()]
+        return [IsAuthenticated()]
+
+
+class DepartmentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Department.objects.all()
+    serializer_class = DepartmentSerializer
     permission_classes = [IsAdminUserRole]
 
+
+# ================= TEMPLATE =================
+class TemplateView(generics.ListCreateAPIView):
+    serializer_class = TemplateSerializer
+    permission_classes = [IsAdminOrSubAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'admin':
+            return Template.objects.all()
+        elif user.role == 'sub_admin':
+            return Template.objects.filter(department=user.department)
+        return Template.objects.none()
+
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        user = self.request.user
+        if user.role == 'sub_admin':
+            serializer.save(created_by=user, department=user.department)
+        else:
+            serializer.save(created_by=user)
 
 
 class TemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Template.objects.all()
     serializer_class = TemplateSerializer
-    permission_classes = [IsAdminUserRole]
+    permission_classes = [IsAdminOrSubAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'admin':
+            return Template.objects.all()
+        elif user.role == 'sub_admin':
+            return Template.objects.filter(department=user.department)
+        return Template.objects.none()
 
 
 # ================= BULK UPLOAD =================
 class BulkUploadListView(generics.ListAPIView):
     serializer_class = BulkUploadSerializer
-    permission_classes = [IsAdminUserRole]
+    permission_classes = [IsAdminOrSubAdmin]
 
     def get_queryset(self):
-        return BulkUpload.objects.all()
+        user = self.request.user
+        if user.role == 'admin':
+            return BulkUpload.objects.all()
+        elif user.role == 'sub_admin':
+            return BulkUpload.objects.filter(template__department=user.department)
+        return BulkUpload.objects.none()
 
 
 class BulkUploadCreateView(generics.CreateAPIView):
     queryset = BulkUpload.objects.all()
     serializer_class = BulkUploadCreateSerializer
-    permission_classes = [IsAdminUserRole]
+    permission_classes = [IsAdminOrSubAdmin]
 
     def perform_create(self, serializer):
         serializer.save(uploaded_by=self.request.user)
 
 
 class BulkUploadDeleteView(generics.DestroyAPIView):
-    queryset = BulkUpload.objects.all()
     serializer_class = BulkUploadSerializer
-    permission_classes = [IsAdminUserRole]
+    permission_classes = [IsAdminOrSubAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'admin':
+            return BulkUpload.objects.all()
+        elif user.role == 'sub_admin':
+            return BulkUpload.objects.filter(template__department=user.department)
+        return BulkUpload.objects.none()
 
     def perform_destroy(self, instance):
         # post_delete signal cleans up storage
@@ -638,9 +729,12 @@ class BulkUploadDeleteView(generics.DestroyAPIView):
 
 # ================= GENERATE CERTS FROM CSV =================
 @api_view(['POST'])
-@permission_classes([IsAdminUserRole])
+@permission_classes([IsAdminOrSubAdmin])
 def process_bulk_upload(request, pk):
     upload = get_object_or_404(BulkUpload, pk=pk)
+    
+    if request.user.role == 'sub_admin' and upload.template.department != request.user.department:
+        raise PermissionDenied("You can only process bulk uploads for your department.")
 
     try:
         # Read CSV and count total rows
