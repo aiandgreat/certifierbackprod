@@ -272,6 +272,10 @@ def google_callback(request):
             'role': user.role,
             'full_name': full_name,
         }
+        if user.department:
+            params['department_id'] = str(user.department.id)
+            params['department_name'] = user.department.name
+            params['department_abbreviation'] = user.department.abbreviation
         
         from urllib.parse import urlencode
         redirect_url = f"{return_to}?{urlencode(params)}"
